@@ -129,6 +129,51 @@ The frontend will be running at `http://localhost:3000`.
 | `MAX_COST_PER_SESSION_SGD` | Cost limit per session (default: 8.0) | No |
 | `CACHE_DIR` | Directory for cached results (default: ./cache) | No |
 
+## Development Roadmap
+
+### Step 1 — Scaffolding (done)
+- Git repo, `.gitignore`, project structure
+- FastAPI backend skeleton with API endpoints
+- LangGraph agent stubs
+- Next.js frontend with landing page
+
+### Step 2 — Transcript Extraction
+- Fetch + chunk transcripts from YouTube URLs
+- Test with a real video
+
+### Step 3 — LangGraph Agents
+- Planner Agent (GPT-4o ranks top 3 concepts)
+- Script Writer Agent (30-sec scripts for top 2)
+- Citation Mapper (timestamp links per claim)
+- Wire them into the state graph
+
+### Step 4 — Backend Pipeline
+- Run the full graph async from `/api/process`
+- Job status tracking + polling via `/api/status`
+- Return real results via `/api/result`
+- Caching layer to avoid re-processing same URLs
+
+### Step 5 — Frontend Pages
+- Results page (2 concept cards with scripts + citation links)
+- Processing page (progress indicator while pipeline runs)
+- Navigation between landing → processing → results
+
+**Week 1 checkpoint (Steps 1–5):** Paste a YouTube URL → see 2 concept scripts with timestamp citations on a live page.
+
+### Step 6 — Video Generation (Week 2)
+- Integrate Runway or Kling API
+- Add video generation node to LangGraph
+- Cost check before calling API
+- Embed generated videos in results page
+
+### Step 7 — Polish + Deploy (Week 3)
+- Deploy backend to Railway/Render
+- Deploy frontend to Vercel
+- Error handling, edge cases
+- UI polish
+- Pre-generate demo examples as backup
+- Prepare presentation
+
 ## Cost Constraints
 
 - Max 2 auto-generated videos per submission
