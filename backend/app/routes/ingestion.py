@@ -112,10 +112,11 @@ async def ingest_video(
         log.info("Video %s already ingested, skipping (use ?reingest=true to force)", video_id)
         return _build_status_from_db(video_id)
 
-    if video_id in ingestions and ingestions[video_id]["status"] == "processing":
+    if not reingest and video_id in ingestions and ingestions[video_id]["status"] == "processing":
         log.info("Video %s ingestion already in progress", video_id)
         return _build_status(video_id, ingestions[video_id])
 
+    # Clear stale in-memory data on reingest
     ingestions[video_id] = {
         "status": "processing",
         "progress": "Starting ingestion",

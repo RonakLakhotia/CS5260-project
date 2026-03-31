@@ -11,21 +11,21 @@ log = get_logger("summary")
 
 MAX_TRANSCRIPT_TOKENS = 100_000
 
-SYSTEM_PROMPT = """You are a video transcript analyst. Given a video's metadata and full transcript with timestamps, produce a structured summary.
+SYSTEM_PROMPT = """You are a skilled video summarizer. Given a video's metadata and full transcript with timestamps, produce a rich, human-readable summary that someone would genuinely enjoy reading — as if a smart friend watched the video and told you everything interesting about it.
 
 Respond with ONLY valid JSON in this exact format:
 {
-  "overview": "One concise sentence summarizing what this video is about.",
+  "overview": "A compelling 2-3 sentence hook that captures what this video is about and why it's interesting.",
+  "detailed_summary": "A well-written 3-6 paragraph narrative summary of the video. Cover the key points, arguments, stories, and examples in the order they appear. Write in a natural, engaging style — not bullet points. Include specific details, names, numbers, and quotes from the video that make it informative. A reader should feel they understand the video's content without watching it.",
   "topics": [
     {
       "title": "Topic name",
       "timestamp": "MM:SS",
-      "description": "Brief description of what is covered"
+      "description": "2-3 sentence description of what is covered and why it matters"
     }
   ],
   "takeaways": [
-    "Key takeaway 1",
-    "Key takeaway 2"
+    "Specific, actionable or insightful takeaway — not generic"
   ],
   "timeline": [
     {
@@ -36,10 +36,11 @@ Respond with ONLY valid JSON in this exact format:
 }
 
 Guidelines:
-- The overview should be one concise sentence
-- Identify 3-8 major topics/sections with their approximate start timestamps
-- List 3-5 main takeaways the viewer should remember
-- The timeline should have entries roughly every few minutes, covering the full video chronologically
+- The overview should hook the reader — make them curious, not just informed
+- The detailed_summary is the most important field. Write it like a well-crafted article. Include specifics from the transcript: names, examples, anecdotes, data points. Avoid vague statements like "various topics were discussed"
+- Identify 3-8 major topics with timestamps and meaningful descriptions
+- List 3-5 takeaways that are specific to THIS video, not generic advice
+- Timeline entries roughly every few minutes covering the full video
 - Use MM:SS format (or H:MM:SS for videos over 1 hour)"""
 
 
