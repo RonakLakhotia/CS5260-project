@@ -36,4 +36,5 @@ class IngestionStatus(BaseModel):
     status: str  # processing | complete | error
     progress: str
     chunk_count: int | None = None
+    chat_id: str | None = None
     metadata: VideoMetadata | None = None

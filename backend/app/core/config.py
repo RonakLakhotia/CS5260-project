@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o"
     chunk_size: int = 1500
     chunk_overlap: int = 200
+    max_transcript_tokens: int = 100000
+    chat_db_path: str = "./chat.db"
+    chat_history_token_budget: int = 50000
 
     model_config = {"env_file": ".env"}
 

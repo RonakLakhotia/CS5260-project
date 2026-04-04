@@ -8,7 +8,17 @@ from app.models.pipeline import (
     ConceptResult,
     ResultResponse,
 )
-from app.models.chat import ChatRequest, ChatResponse, SourceChunk
+from app.models.chat import (
+    ChatRequest,
+    ChatResponse,
+    SourceChunk,
+    CreateSessionRequest,
+    CreateSessionResponse,
+    SendMessageRequest,
+    SendMessageResponse,
+    MessageRecord,
+    SessionRecord,
+)
 
 __all__ = [
     "YTSageState",
@@ -23,4 +33,10 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "SourceChunk",
+    "CreateSessionRequest",
+    "CreateSessionResponse",
+    "SendMessageRequest",
+    "SendMessageResponse",
+    "MessageRecord",
+    "SessionRecord",
 ]

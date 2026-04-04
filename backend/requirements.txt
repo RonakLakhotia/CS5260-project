@@ -10,3 +10,4 @@ chromadb==0.5.23
 langchain-chroma==0.2.2
 langchain-text-splitters==0.3.4
 yt-dlp==2026.3.17
+aiosqlite==0.20.0

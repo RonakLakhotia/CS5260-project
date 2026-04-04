@@ -1,19 +1,13 @@
-import json
-
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.prompts import EXTRACT_CLAIMS_PROMPT
 from app.models import YTSageState
 from app.services.vector_store import query_chunks
+from app.services.summary import parse_json_response
 
 log = get_logger("agent.citation_mapper")
-
-
-EXTRACT_CLAIMS_PROMPT = """Extract the distinct factual claims from the following narration script.
-Return ONLY valid JSON — a list of short claim strings.
-
-Example: ["Transformers use self-attention", "BERT is bidirectional"]"""
 
 
 async def map_citations(state: YTSageState) -> dict:
@@ -40,12 +34,14 @@ async def map_citations(state: YTSageState) -> dict:
             {"role": "user", "content": script["script_text"]},
         ])
 
-        try:
-            claims = json.loads(claim_response.content)
-            log.info("Extracted %d claims from '%s'", len(claims), script["concept_title"])
-        except json.JSONDecodeError:
-            log.error("Failed to parse claims JSON: %s", claim_response.content[:200])
+        parsed = parse_json_response(claim_response.content)
+        # parse_json_response returns a dict; claims should be a list
+        claims = parsed if isinstance(parsed, list) else parsed.get("raw", [])
+        if not isinstance(claims, list):
+            log.error("Failed to parse claims for '%s': %s", script["concept_title"], claim_response.content[:200])
             claims = []
+        else:
+            log.info("Extracted %d claims from '%s'", len(claims), script["concept_title"])
 
         mapped_claims = []
         for claim_text in claims:
@@ -53,11 +49,10 @@ async def map_citations(state: YTSageState) -> dict:
             if matches:
                 best = matches[0]
                 timestamp = int(best["start_time"])
-                base_url = state["youtube_url"].split("&t=")[0]
                 mapped_claims.append({
-                    "text": claim_text,
+                    "claim": claim_text,
                     "timestamp": timestamp,
-                    "url": f"{base_url}&t={timestamp}",
+                    "url": f"https://www.youtube.com/watch?v={video_id}&t={timestamp}",
                 })
                 log.info("  Claim mapped → %ds: %.60s...", timestamp, claim_text)
 

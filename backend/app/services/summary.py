@@ -6,42 +6,9 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.prompts import SUMMARY_SYSTEM_PROMPT
 
 log = get_logger("summary")
-
-MAX_TRANSCRIPT_TOKENS = 100_000
-
-SYSTEM_PROMPT = """You are a skilled video summarizer. Given a video's metadata and full transcript with timestamps, produce a rich, human-readable summary that someone would genuinely enjoy reading — as if a smart friend watched the video and told you everything interesting about it.
-
-Respond with ONLY valid JSON in this exact format:
-{
-  "overview": "A compelling 2-3 sentence hook that captures what this video is about and why it's interesting.",
-  "detailed_summary": "A well-written 3-6 paragraph narrative summary of the video. Cover the key points, arguments, stories, and examples in the order they appear. Write in a natural, engaging style — not bullet points. Include specific details, names, numbers, and quotes from the video that make it informative. A reader should feel they understand the video's content without watching it.",
-  "topics": [
-    {
-      "title": "Topic name",
-      "timestamp": "MM:SS",
-      "description": "2-3 sentence description of what is covered and why it matters"
-    }
-  ],
-  "takeaways": [
-    "Specific, actionable or insightful takeaway — not generic"
-  ],
-  "timeline": [
-    {
-      "timestamp": "MM:SS",
-      "description": "What is being discussed at this point"
-    }
-  ]
-}
-
-Guidelines:
-- The overview should hook the reader — make them curious, not just informed
-- The detailed_summary is the most important field. Write it like a well-crafted article. Include specifics from the transcript: names, examples, anecdotes, data points. Avoid vague statements like "various topics were discussed"
-- Identify 3-8 major topics with timestamps and meaningful descriptions
-- List 3-5 takeaways that are specific to THIS video, not generic advice
-- Timeline entries roughly every few minutes covering the full video
-- Use MM:SS format (or H:MM:SS for videos over 1 hour)"""
 
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
@@ -105,7 +72,7 @@ def _sample_long_transcript(raw_segments: list[dict], max_tokens: int) -> str:
     return _format_transcript(sampled)
 
 
-def _parse_json_response(content: str) -> dict:
+def parse_json_response(content: str) -> dict:
     """Parse JSON from LLM response, handling markdown fences."""
     # Strip markdown code fences if present
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", content.strip())
@@ -132,11 +99,11 @@ async def generate_summary(raw_segments: list[dict], video_meta: dict) -> str:
         token_count = count_tokens(full_text)
         log.info("Transcript: %d tokens (%d segments)", token_count, len(raw_segments))
 
-        if token_count <= MAX_TRANSCRIPT_TOKENS:
+        if token_count <= settings.max_transcript_tokens:
             transcript_text = full_text
             log.info("Full transcript within limit, sending directly to LLM")
         else:
-            transcript_text = _sample_long_transcript(raw_segments, MAX_TRANSCRIPT_TOKENS)
+            transcript_text = _sample_long_transcript(raw_segments, settings.max_transcript_tokens)
             sampled_tokens = count_tokens(transcript_text)
             log.info("Transcript too long (%d tokens), sampled to %d tokens", token_count, sampled_tokens)
             transcript_text = (
@@ -162,14 +129,14 @@ async def generate_summary(raw_segments: list[dict], video_meta: dict) -> str:
 
         log.info("Calling %s for summary generation...", settings.llm_model)
         response = await llm.ainvoke([
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
             {"role": "user", "content": (
                 f"--- Video Info ---\n{meta_context}\n\n"
                 f"--- Full Transcript ---\n{transcript_text}"
             )},
         ])
 
-        summary = _parse_json_response(response.content)
+        summary = parse_json_response(response.content)
         summary_json = json.dumps(summary, ensure_ascii=False)
         log.info("Summary generated: %d topics, %d takeaways",
                  len(summary.get("topics", [])), len(summary.get("takeaways", [])))

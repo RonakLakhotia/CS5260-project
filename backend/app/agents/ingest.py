@@ -16,6 +16,7 @@ async def ingest_transcript(state: YTSageState) -> dict:
         log.info("Video %s already ingested, skipping", video_id)
         return {
             "video_id": video_id,
+            "transcript_chunks": [],
             "status": "processing",
         }
 

@@ -50,11 +50,11 @@ async def _run_pipeline(job_id: str, youtube_url: str):
 
         concepts = []
         for i, script in enumerate(result.get("scripts", [])):
-            citation_data = (
-                result["citations"][i]
-                if i < len(result.get("citations", []))
-                else {"claims": []}
-            )
+            if i < len(result.get("citations", [])):
+                citation_data = result["citations"][i]
+            else:
+                log.warning("[pipeline:%s] Missing citations for script %d: '%s'", job_id[:8], i, script["concept_title"])
+                citation_data = {"claims": []}
             concepts.append({
                 "title": script["concept_title"],
                 "script": script["script_text"],

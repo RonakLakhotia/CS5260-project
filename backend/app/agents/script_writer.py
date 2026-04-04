@@ -2,21 +2,11 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.prompts import SCRIPT_WRITER_SYSTEM_PROMPT
 from app.models import YTSageState
 from app.services.vector_store import query_chunks
 
 log = get_logger("agent.script_writer")
-
-
-SYSTEM_PROMPT = """You write concise, engaging 30-second narration scripts for educational short-form videos.
-
-Rules:
-- The script must be based ONLY on the provided transcript excerpts.
-- Keep it under 80 words (roughly 30 seconds when spoken).
-- Use clear, accessible language suitable for a general audience.
-- Start with a hook that grabs attention.
-- End with a memorable takeaway.
-- Do NOT add information not present in the source material."""
 
 
 async def write_scripts(state: YTSageState) -> dict:
@@ -54,7 +44,7 @@ async def write_scripts(state: YTSageState) -> dict:
         )
 
         response = await llm.ainvoke([
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SCRIPT_WRITER_SYSTEM_PROMPT},
             {"role": "user", "content": (
                 f"Write a 30-second narration script about: {concept['title']}\n\n"
                 f"Description: {concept.get('description', '')}\n\n"

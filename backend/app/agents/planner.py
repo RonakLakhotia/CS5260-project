@@ -1,31 +1,13 @@
-import json
-
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.prompts import PLANNER_SYSTEM_PROMPT
 from app.models import YTSageState
 from app.services.vector_store import query_chunks
+from app.services.summary import parse_json_response
 
 log = get_logger("agent.planner")
-
-
-SYSTEM_PROMPT = """You analyze YouTube video transcripts and identify the most important concepts.
-
-Given transcript excerpts, identify the top 3 most important, distinct concepts discussed.
-Rank them by educational value and how well they could be explained in a 30-second short video.
-
-Respond with ONLY valid JSON in this exact format:
-{
-  "concepts": [
-    {
-      "title": "Short concept title",
-      "description": "1-2 sentence description of the concept",
-      "relevant_keywords": "comma-separated keywords for retrieval",
-      "rank": 1
-    }
-  ]
-}"""
 
 
 async def plan_concepts(state: YTSageState) -> dict:
@@ -55,18 +37,17 @@ async def plan_concepts(state: YTSageState) -> dict:
 
     log.info("Calling %s to rank concepts...", settings.llm_model)
     response = await llm.ainvoke([
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
         {"role": "user", "content": (
             f"Analyze the following transcript excerpts from a YouTube video and "
             f"identify the top 3 most important concepts.\n\nTranscript:\n{context}"
         )},
     ])
 
-    try:
-        parsed = json.loads(response.content)
-        concepts = parsed["concepts"]
-        log.info("Planner identified %d concepts: %s", len(concepts), [c["title"] for c in concepts])
-    except (json.JSONDecodeError, KeyError):
+    parsed = parse_json_response(response.content)
+    concepts = parsed.get("concepts", [])
+
+    if not concepts:
         log.error("Failed to parse planner response: %s", response.content[:200])
         return {
             "top_concepts": [],
@@ -74,6 +55,7 @@ async def plan_concepts(state: YTSageState) -> dict:
             "error_message": "Failed to parse planner response",
         }
 
+    log.info("Planner identified %d concepts: %s", len(concepts), [c["title"] for c in concepts])
     return {
         "top_concepts": concepts,
         "status": "processing",
