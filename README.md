@@ -1,6 +1,6 @@
 # YTSage — YouTube to Shorts Synthesis Agent
 
-YTSage is an AI agent that takes a YouTube lecture or tech talk URL and produces 2 AI-generated 30-second explainer video shorts for the most important concepts in the video. Each short includes a script with timestamp citations traceable back to the source.
+YTSage is a multi-agent AI system that transforms long-form YouTube lectures and tech talks into short-form educational infographic slideshows. Given a YouTube URL, it extracts the transcript, identifies key concepts, designs educational infographics, and stitches them into a video summary.
 
 > This product is entirely derived from work conducted as part of the NUS CS5260 course.
 
@@ -8,18 +8,28 @@ YTSage is an AI agent that takes a YouTube lecture or tech talk URL and produces
 
 ```
 User pastes YouTube URL
-        ↓
-Extract + chunk transcript (YouTube Transcript API)
-        ↓
-Planner Agent — ranks top 3 concepts by importance
-        ↓
-Script Writer Agent — writes ~30-sec narration script per concept (top 2)
-        ↓
-Citation Mapper — links each claim to a timestamp in the source video
-        ↓
-Text-to-Video Agent — generates 2x ~30-sec AI explainer clips (Runway/Kling)
-        ↓
-Output Page — embedded clips, scripts, and citation links
+        |
+        v
+Transcript Extraction (YouTube Transcript API)
+  - Extract transcript, merge into ~60s chunks
+        |
+        v
+Planner Agent (GPT-4o via Replicate)
+  - Identify top 3 concepts with timestamps
+  - Attach relevant transcript segments to each concept
+        |
+        v
+Script Writer Agent (GPT-4o via Replicate)
+  - Design 2 infographic prompts per concept (overview + deep dive)
+  - Grounded in actual transcript segments
+        |
+        v
+Video Generator Agent (Nano Banana Pro via Replicate)
+  - Generate 6 infographic images (2 per concept)
+  - Stitch into a 30-second MP4 slideshow (ffmpeg)
+        |
+        v
+Output — Infographic images + slideshow video
 ```
 
 ### Tech Stack
@@ -27,12 +37,25 @@ Output Page — embedded clips, scripts, and citation links
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python, FastAPI |
-| Agent Orchestration | LangGraph |
-| LLM | GPT-4o (OpenAI API) |
+| Agent Orchestration | LangGraph (directed state graph) |
+| LLM | GPT-4o via Replicate |
+| Image Generation | Google Nano Banana Pro via Replicate |
 | Transcript Extraction | youtube-transcript-api |
-| Text-to-Video | Runway ML / Kling API |
+| Video Stitching | ffmpeg |
 | Frontend | Next.js, TypeScript, Tailwind CSS |
-| Caching | File-based (by URL hash) |
+| Caching | File-based (SHA256 by URL hash) |
+
+### Multi-Agent Pipeline (LangGraph)
+
+The system uses LangGraph to orchestrate 3 specialized agents in sequence with error-safe conditional routing:
+
+```
+planner --[ok]--> script_writer --[ok]--> video_generator --> END
+    |                   |
+    +--[error]-->END    +--[error]-->END
+```
+
+Each agent reads from and writes to a shared `YTSageState` (TypedDict), enabling structured data flow between stages.
 
 ## Project Structure
 
@@ -40,24 +63,27 @@ Output Page — embedded clips, scripts, and citation links
 project/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── config.py            # Settings from environment variables
-│   │   ├── models.py            # Pydantic models + LangGraph state
+│   │   ├── main.py                 # FastAPI entry point + CORS
+│   │   ├── config.py               # Settings (API keys, cost limits)
+│   │   ├── models.py               # Pydantic models + LangGraph state
 │   │   ├── routes/
-│   │   │   └── api.py           # API endpoints
+│   │   │   └── api.py              # API endpoints (/process, /status, /result)
 │   │   ├── agents/
-│   │   │   ├── graph.py         # LangGraph state graph
-│   │   │   ├── planner.py       # Concept ranking agent
-│   │   │   ├── script_writer.py # Script generation agent
-│   │   │   ├── citation_mapper.py # Timestamp citation agent
-│   │   │   └── video_generator.py # Text-to-video agent
+│   │   │   ├── graph.py            # LangGraph state graph (planner → script_writer → video_generator)
+│   │   │   ├── planner.py          # Concept ranking agent (GPT-4o)
+│   │   │   ├── script_writer.py    # Infographic prompt designer (GPT-4o)
+│   │   │   └── video_generator.py  # Image generation + slideshow (Nano Banana Pro + ffmpeg)
 │   │   └── services/
-│   │       ├── transcript.py    # YouTube transcript extraction
-│   │       └── cache.py         # File-based caching
+│   │       ├── transcript.py       # YouTube transcript extraction + chunking
+│   │       ├── cache.py            # File-based caching
+│   │       └── infographic.py      # Pillow-based infographic fallback
 │   ├── requirements.txt
+│   ├── test_pipeline.py            # Step-by-step pipeline debugger
 │   └── .env.example
-├── frontend/                    # Next.js app
-│   └── src/app/page.tsx         # Landing page
+├── frontend/
+│   └── src/app/page.tsx            # Landing page (URL input)
+├── Proposal.pdf                    # CS5260 project proposal
+├── PLAN.md                         # Implementation plan + progress
 └── README.md
 ```
 
@@ -65,10 +91,10 @@ project/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/process` | Submit a YouTube URL for processing |
+| POST | `/api/process` | Submit a YouTube URL — kicks off the full pipeline |
 | GET | `/api/status/{job_id}` | Poll job status and progress |
-| GET | `/api/result/{job_id}` | Get completed results (scripts, citations, videos) |
-| POST | `/api/generate-third/{job_id}` | Generate video for the 3rd concept (on-demand) |
+| GET | `/api/result/{job_id}` | Get completed results (infographics, slideshow) |
+| POST | `/api/test-transcript` | Test transcript extraction for a URL |
 | GET | `/health` | Health check |
 
 ## Getting Started
@@ -77,7 +103,8 @@ project/
 
 - Python 3.11+
 - Node.js 18+
-- npm
+- ffmpeg (for video stitching)
+- Replicate account with API token
 
 ### Backend Setup
 
@@ -89,7 +116,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env and add your API keys
+# Edit .env and add your Replicate API token
 ```
 
 **Run the server:**
@@ -98,88 +125,78 @@ cp .env.example .env
 ./backend/run.sh
 ```
 
-The backend will be running at `http://localhost:8000`. You can verify at `http://localhost:8000/health`.
+The backend runs at `http://localhost:8000`. Verify at `http://localhost:8000/health`.
 
-**Test transcript extraction:**
+**Test the pipeline step-by-step:**
 
 ```bash
-curl -X POST http://localhost:8000/api/test-transcript \
-  -H "Content-Type: application/json" \
-  -d '{"youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID_HERE"}'
+cd backend
+python test_pipeline.py 1    # Extract transcript
+python test_pipeline.py 2    # Run planner (GPT-4o)
+python test_pipeline.py 3    # Run script writer (GPT-4o)
+python test_pipeline.py 4    # Generate infographics + slideshow
 ```
+
+Each step saves its output to a JSON file. The next step loads from the previous step's output, so you can inspect and debug between steps.
 
 ### Frontend Setup
 
 ```bash
-# Navigate to frontend
 cd frontend
-
-# Install dependencies
 npm install
-
-# Run the dev server
 npm run dev
 ```
 
-The frontend will be running at `http://localhost:3000`.
+The frontend runs at `http://localhost:3000`.
 
 ### Environment Variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT-4o | Yes |
-| `RUNWAY_API_KEY` | Runway ML API key for video generation | Later (Week 2) |
+| `REPLICATE_API_TOKEN` | Replicate API token (for GPT-4o + Nano Banana Pro) | Yes |
 | `MAX_COST_PER_SESSION_SGD` | Cost limit per session (default: 8.0) | No |
 | `CACHE_DIR` | Directory for cached results (default: ./cache) | No |
 
-## Development Roadmap
+## Agents
 
-### Step 1 — Scaffolding (done)
-- Git repo, `.gitignore`, project structure
-- FastAPI backend skeleton with API endpoints
-- LangGraph agent stubs
-- Next.js frontend with landing page
+### Planner Agent
+- **Model:** GPT-4o via Replicate
+- **Input:** Merged transcript chunks
+- **Output:** Top 3 concepts, each with title, description, timestamps, and relevant transcript segments
+- **Cost:** ~$0.02 per call
 
-### Step 2 — Transcript Extraction
-- Fetch + chunk transcripts from YouTube URLs
-- Test with a real video
+### Script Writer Agent
+- **Model:** GPT-4o via Replicate
+- **Input:** Top 3 concepts with transcript segments
+- **Output:** 2 infographic prompts per concept (overview + deep dive)
+- **Cost:** ~$0.02 per call
 
-### Step 3 — LangGraph Agents
-- Planner Agent (GPT-4o ranks top 3 concepts)
-- Script Writer Agent (30-sec scripts for top 2)
-- Citation Mapper (timestamp links per claim)
-- Wire them into the state graph
+### Video Generator Agent
+- **Model:** Google Nano Banana Pro via Replicate
+- **Input:** 6 infographic prompts from script writer
+- **Output:** 6 infographic images + 1 stitched MP4 slideshow (30s, 5s per slide)
+- **Cost:** ~$0.50 per run (6 images)
 
-### Step 4 — Backend Pipeline
-- Run the full graph async from `/api/process`
-- Job status tracking + polling via `/api/status`
-- Return real results via `/api/result`
-- Caching layer to avoid re-processing same URLs
+**Total estimated cost per video:** ~$0.55
 
-### Step 5 — Frontend Pages
-- Results page (2 concept cards with scripts + citation links)
-- Processing page (progress indicator while pipeline runs)
-- Navigation between landing → processing → results
+## Course Relevance (CS5260)
 
-**Week 1 checkpoint (Steps 1–5):** Paste a YouTube URL → see 2 concept scripts with timestamp citations on a live page.
+This project incorporates concepts from multiple weeks of the CS5260 curriculum:
 
-### Step 6 — Video Generation (Week 2)
-- Integrate Runway or Kling API
-- Add video generation node to LangGraph
-- Cost check before calling API
-- Embed generated videos in results page
-
-### Step 7 — Polish + Deploy (Week 3)
-- Deploy backend to Railway/Render
-- Deploy frontend to Vercel
-- Error handling, edge cases
-- UI polish
-- Pre-generate demo examples as backup
-- Prepare presentation
+| Week | Topic | How it's used in YTSage |
+|------|-------|------------------------|
+| Week 1 | Transformers, MoE | Tested with 3Blue1Brown Attention video |
+| Week 8 | Video Generation (DiT, Wan, Hunyuan) | Nano Banana Pro for infographic generation |
+| Week 10 | LLM Agents (ReAct, AutoGen) | Multi-agent LangGraph pipeline |
 
 ## Cost Constraints
 
-- Max 2 auto-generated videos per submission
-- 3rd video only on explicit user request
-- All generated results are cached by YouTube URL hash
+- Total API cost must stay under SGD 10 for testing
 - Session aborts if estimated cost exceeds SGD 8
+- All results cached by YouTube URL hash to avoid re-processing
+- Estimated cost per run: ~$0.55
+
+## Team
+
+- Ronak Lakhotia (A0161401Y)
+- Shivansh Srivastava (A0328697H)

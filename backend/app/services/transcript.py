@@ -25,7 +25,7 @@ def extract_video_id(url: str) -> str:
 def _fetch_captions(video_id: str) -> list[dict] | None:
     """Try to get captions via YouTube Transcript API (v1.x).
 
-    Priority: English (manual/auto) → translated to English → any language raw.
+    Priority: English (manual/auto) -> translated to English -> any language raw.
     Returns None if no captions are available at all.
     """
     try:
@@ -56,7 +56,7 @@ def _fetch_captions(video_id: str) -> list[dict] | None:
     for t in transcripts:
         if t.is_translatable:
             try:
-                log.info("Trying %s → English translation for %s", t.language_code, video_id)
+                log.info("Trying %s -> English translation for %s", t.language_code, video_id)
                 translated = t.translate("en").fetch()
                 chunks = [
                     {"text": s.text, "start_time": s.start, "end_time": s.start + s.duration}
@@ -112,7 +112,6 @@ def _whisper_transcribe(youtube_url: str) -> list[dict]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([youtube_url])
 
-        # yt-dlp may add extension, find the actual file
         actual_path = audio_path
         if not os.path.exists(actual_path):
             for f in os.listdir(tmpdir):
@@ -147,11 +146,9 @@ def _whisper_transcribe(youtube_url: str) -> list[dict]:
 def get_transcript(youtube_url: str) -> list[dict]:
     """Fetch transcript with fallback chain:
     1. English captions (manual/auto)
-    2. Any language → English translation
+    2. Any language -> English translation
     3. Raw captions in any available language
     4. Whisper transcription (download audio + OpenAI API)
-
-    Returns list of {text, start_time, end_time}.
     """
     video_id = extract_video_id(youtube_url)
     log.info("Fetching transcript for video %s", video_id)
@@ -161,7 +158,6 @@ def get_transcript(youtube_url: str) -> list[dict]:
         log.info("Caption fetch complete: %d raw chunks", len(captions))
         return captions
 
-    # Fallback: Whisper transcription (costs ~$0.006/min)
     return _whisper_transcribe(youtube_url)
 
 
@@ -207,11 +203,9 @@ def semantic_chunk_transcript(
 
     log.info("Semantic chunking: %d raw chunks (size=%d, overlap=%d)", len(raw_chunks), chunk_size, chunk_overlap)
 
-    # Step 1: merge into small timed blocks (~15s)
     blocks = merge_chunks(raw_chunks, max_duration=15.0)
     log.info("Merged into %d timed blocks (~15s each)", len(blocks))
 
-    # Build a full text and track character offsets for each block
     block_offsets: list[dict] = []
     full_text = ""
     for block in blocks:
@@ -225,7 +219,6 @@ def semantic_chunk_transcript(
             "end_time": block["end_time"],
         })
 
-    # Step 2: semantic split on sentence boundaries
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -233,7 +226,6 @@ def semantic_chunk_transcript(
     )
     text_chunks = splitter.split_text(full_text)
 
-    # Step 3: re-map each chunk to timestamps
     result = []
     search_start = 0
     for idx, chunk_text in enumerate(text_chunks):

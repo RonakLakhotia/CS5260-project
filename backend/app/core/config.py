@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     openai_api_key: str = ""
-    runway_api_key: str = ""
+    replicate_api_token: str = ""
     max_cost_per_session_sgd: float = 8.0
     cache_dir: str = "./cache"
     chroma_persist_dir: str = "./chroma_db"
