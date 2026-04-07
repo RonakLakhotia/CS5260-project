@@ -131,13 +131,20 @@ The backend runs at `http://localhost:8000`. Verify at `http://localhost:8000/he
 
 ```bash
 cd backend
-python test_pipeline.py 1    # Extract transcript
-python test_pipeline.py 2    # Run planner (GPT-4o)
-python test_pipeline.py 3    # Run script writer (GPT-4o)
-python test_pipeline.py 4    # Generate infographics + slideshow
+python test_pipeline.py 1    # Step 1: Extract transcript
+python test_pipeline.py 2    # Step 2: Run planner
+python test_pipeline.py 3    # Step 3: Run script writer
+python test_pipeline.py 4    # Step 4: Generate infographics + slideshow
 ```
 
-Each step saves its output to a JSON file. The next step loads from the previous step's output, so you can inspect and debug between steps.
+Each step saves its output to a JSON file (`test_output_N_*.json`). The next step loads from the previous step's output, so you can inspect and debug between steps.
+
+| Step | Agent | What it does |
+|------|-------|-------------|
+| 1 | Transcript Service | Fetches the YouTube transcript using the YouTube Transcript API (with fallback to Whisper). Merges raw caption entries into ~60-second chunks. Saves to `test_output_1_transcript.json`. |
+| 2 | Planner Agent (GPT-4o) | Sends the transcript to GPT-4o via Replicate. Identifies the top 3 key concepts with titles, descriptions, and timestamp ranges. Attaches relevant transcript segments to each concept. Saves to `test_output_2_planner.json`. |
+| 3 | Script Writer Agent (GPT-4o) | Takes the 3 concepts and their transcript segments. Sends to GPT-4o via Replicate to design 2 infographic prompts per concept (overview slide + deep dive slide). Saves to `test_output_3_scripts.json`. |
+| 4 | Video Generator (Nano Banana Pro) | Takes the 6 infographic prompts from step 3. Generates 6 infographic images using Google's Nano Banana Pro via Replicate. Downloads the images and stitches them into a single 30-second MP4 slideshow (5 seconds per slide) using ffmpeg. Saves to `test_output_4_videos.json`. |
 
 ### Frontend Setup
 
