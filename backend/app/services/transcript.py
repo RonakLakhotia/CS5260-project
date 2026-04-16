@@ -97,7 +97,7 @@ def _whisper_transcribe(youtube_url: str) -> list[dict]:
         audio_path = os.path.join(tmpdir, "audio.mp3")
 
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=480]/best",
             "outtmpl": audio_path,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -106,6 +106,7 @@ def _whisper_transcribe(youtube_url: str) -> list[dict]:
             }],
             "quiet": True,
             "no_warnings": True,
+            "ignoreerrors": True,
         }
         # Use cookies file if present (helps bypass YouTube bot detection on cloud IPs)
         _cookies = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
