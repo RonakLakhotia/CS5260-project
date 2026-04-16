@@ -16,9 +16,11 @@ def _ydl_opts_base() -> dict:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
+        "ignoreerrors": True,
+        "ignore_no_formats_error": True,  # don't fail if no downloadable formats (we only want metadata)
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "web"],
+                "player_client": ["web", "android", "ios"],
             }
         },
     }
