@@ -12,7 +12,16 @@ _COOKIES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__f
 
 
 def _ydl_opts_base() -> dict:
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"],
+            }
+        },
+    }
     if os.path.isfile(_COOKIES_FILE):
         opts["cookiefile"] = _COOKIES_FILE
     return opts
