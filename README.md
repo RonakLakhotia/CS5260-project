@@ -1,255 +1,316 @@
-# YTSage — YouTube to Shorts Synthesis Agent
+# YTSage - YouTube Video Chat + Infographic Synthesis
 
-YTSage is a multi-agent AI system that transforms long-form YouTube lectures and tech talks into short-form educational infographic slideshows. Given a YouTube URL, it extracts the transcript, identifies key concepts, designs educational infographics, and stitches them into a video summary.
+YTSage is a multi-agent AI system that turns any YouTube video into a conversational assistant. Paste a URL and you can:
 
-> This product is entirely derived from work conducted as part of the NUS CS5260 course.
+1. **Chat with the video** - ask anything; answers are grounded in the transcript with clickable source timestamps that seek the embedded player.
+2. **Generate an infographic slideshow** - in the background, a LangGraph pipeline extracts the 3 most important concepts, designs 6 educational infographic slides, and stitches them into a 30-second MP4.
+3. **Switch to web search** - toggle the "Web search" button in the chat to answer general questions using Gemini + Google Search grounding with citation links.
+
+> Built for NUS CS5260.
+
+**Live demo**: https://cs-5260-project.vercel.app
 
 ## Architecture
 
 ```
-User pastes YouTube URL (frontend)
-        |
-        v
-Ingest Agent
-  - Extract transcript (YouTube Transcript API, fallback to Whisper)
-  - Semantic chunking + embed into ChromaDB vector store
-        |
-        v
-Planner Agent (GPT-4o via Replicate)
-  - RAG query on vector store for overview chunks
-  - Identify top 3 concepts with timestamps
-  - Attach relevant transcript segments to each concept
-        |
-        v
-Script Writer Agent (GPT-4o via Replicate)
-  - Design 2 infographic prompts per concept (overview + deep dive)
-  - Grounded in actual transcript segments
-        |
-        v
-Video Generator Agent (Nano Banana Pro via Replicate)
-  - Generate 6 infographic images (2 per concept)
-  - Stitch into a 30-second MP4 slideshow (ffmpeg)
-        |
-        v
-Results Page — Infographic images, slideshow video, timestamp links
+User pastes a YouTube URL
+         |
+         v
+[Ingestion SSE]
+   - yt-dlp metadata
+   - Transcript (caption API + Whisper fallback)
+   - GPT-4o summary (parallel with chunking)
+   - Semantic chunking + OpenAI embeddings -> ChromaDB
+   - Create chat session (SQLite)
+         |
+         +----> redirect to /chat
+         |
+         v
+[LangGraph pipeline (background)]
+   ingest -> planner -> script_writer -> video_generator -> END
+             GPT-4o     GPT-4o          Nano Banana Pro
+                                        + ffmpeg stitch
+                                        |
+                                        v
+                              slideshow.mp4 (1080x1920, 30s)
 ```
 
-### Tech Stack
+The chat, ingestion, and infographic pipeline all run in parallel. The user can chat with the transcript while the slideshow is still being generated.
+
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python, FastAPI |
-| Agent Orchestration | LangGraph (directed state graph) |
-| LLM | GPT-4o via Replicate |
-| Image Generation | Google Nano Banana Pro via Replicate |
-| Transcript Extraction | youtube-transcript-api + Whisper fallback |
-| Vector Store | ChromaDB + OpenAI embeddings |
-| Semantic Chunking | LangChain text splitters |
-| Video Stitching | ffmpeg |
-| Frontend | Next.js 16, TypeScript, Tailwind CSS |
-| Caching | File-based (SHA256 by URL hash) |
+| Backend | Python 3.12, FastAPI, Uvicorn |
+| Agent orchestration | LangGraph |
+| LLM (pipeline + chat) | OpenAI GPT-4o |
+| LLM (web search) | Gemini 2.5 Flash with Google Search grounding |
+| Image generation | Google Nano Banana Pro (via Replicate) |
+| Video stitching | ffmpeg |
+| Transcript | youtube-transcript-api + OpenAI Whisper fallback |
+| Vector store | ChromaDB (cosine distance) |
+| Embeddings | OpenAI `text-embedding-3-small` |
+| Chat persistence | SQLite (aiosqlite, WAL mode) |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind 4 |
+| Markdown rendering | react-markdown |
+| Deployment (backend) | GCE Ubuntu 22.04 + nginx + Let's Encrypt (sslip.io) |
+| Deployment (frontend) | Vercel |
 
-### Multi-Agent Pipeline (LangGraph)
+## Features
 
-The system uses LangGraph to orchestrate 4 agents in sequence with error-safe conditional routing:
+### Chat with the video
+- Streaming token-by-token responses (SSE)
+- RAG against transcript chunks; results filtered by cosine distance
+- Conversational context: conversational follow-ups ("explain that further") are rewritten into standalone queries before searching
+- Conversation history persisted in SQLite with a rolling summary for long sessions
+- Up to 3 transcript "Video references" shown under each answer - each has a **Play** button that seeks the embedded YouTube player in place via the iframe API (no tab switches, no state loss)
 
-```
-ingest --> planner --[ok]--> script_writer --[ok]--> video_generator --> END
-                |                   |
-                +--[error]-->END    +--[error]-->END
-```
+### Web search toggle
+- Gemini 2.5 Flash with `google_search` tool
+- Streams the answer with inline markdown + source citations as "Web sources"
 
-Each agent reads from and writes to a shared `YTSageState` (TypedDict), enabling structured data flow between stages.
+### Infographic slideshow
+- Runs concurrently with the chat so the user is never blocked
+- Subtle pill above the chat input shows live pipeline progress (expandable to see each step, check marks for completed stages)
+- Transitions to a green "Slideshow ready" pill when the MP4 is available; clicking opens a floating video player card
+- State survives page refreshes and is looked up per-video from SQLite, so any browser / device shows the correct status
+
+### Storage
+All three storage systems are linked by `video_id`:
+- `yt_{video_id}` ChromaDB collection - transcript chunks + embeddings
+- `videos` SQLite table - metadata, slideshow path, pipeline job id
+- `./cache/videos/slideshow_{video_id}.mp4` - stitched video file
+
+## API
+
+All `/api/*` endpoints require an `X-API-Key` header (or `?api_key=` query param for media URLs) when `API_KEY` is set in `.env`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/ingest` | SSE stream: metadata -> transcript -> summary -> embedding -> done |
+| GET | `/api/ingest/{video_id}` | Polling fallback for ingestion status |
+| POST | `/api/process` | Kick off the LangGraph infographic pipeline |
+| GET | `/api/status/{job_id}` | Poll pipeline status |
+| GET | `/api/result/{job_id}` | Completed pipeline result |
+| GET | `/api/slideshow/video/{video_id}` | Serve slideshow MP4 (survives backend restarts via SQLite lookup) |
+| GET | `/api/videos` | List all ingested videos |
+| GET | `/api/videos/{video_id}` | Get a video's metadata + slideshow/pipeline status |
+| POST | `/api/chat/sessions` | Create a chat session |
+| POST | `/api/chat/sessions/{chat_id}/messages` | SSE stream: status -> sources -> tokens -> done |
+| GET | `/api/chat/sessions/{chat_id}/messages` | Full message history |
+| GET | `/health` | Health check (no auth) |
+
+SSE events the frontend consumes:
+- `status` - `searching_transcript`, `reviewing_history`, `searching_web`, `generating`
+- `sources` - top 3 transcript chunks with timestamps
+- `web_sources` - Gemini grounding citations
+- `token` - streaming text chunk
+- `done` - final `message_id`
+- `error` - failure message
 
 ## Project Structure
 
 ```
-project/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                 # FastAPI entry point + CORS + lifespan
-│   │   ├── core/
-│   │   │   ├── config.py           # Settings (API keys, cost limits, ChromaDB)
-│   │   │   ├── logger.py           # Structured logging
-│   │   │   └── prompts.py          # Centralized LLM prompts
-│   │   ├── models/
-│   │   │   ├── state.py            # LangGraph state (YTSageState)
-│   │   │   ├── pipeline.py         # API request/response models
-│   │   │   ├── ingestion.py        # Ingestion status + video metadata
-│   │   │   └── chat.py             # Chat session models
-│   │   ├── routes/
-│   │   │   ├── pipeline.py         # /process, /status, /result, /slideshow
-│   │   │   ├── ingestion.py        # /ingest endpoint
-│   │   │   ├── chat.py             # Chat-with-video endpoints
-│   │   │   └── debug.py            # Debug endpoints
-│   │   ├── agents/
-│   │   │   ├── graph.py            # LangGraph state graph
-│   │   │   ├── ingest.py           # Transcript ingestion + vector store
-│   │   │   ├── planner.py          # Concept ranking agent (GPT-4o via Replicate)
-│   │   │   ├── script_writer.py    # Infographic prompt designer (GPT-4o via Replicate)
-│   │   │   └── video_generator.py  # Image generation + slideshow (Nano Banana Pro + ffmpeg)
-│   │   └── services/
-│   │       ├── transcript.py       # YouTube transcript extraction + semantic chunking
-│   │       ├── vector_store.py     # ChromaDB ingestion + retrieval
-│   │       ├── cache.py            # File-based caching
-│   │       ├── summary.py          # Video summarization
-│   │       ├── conversation.py     # Chat-with-video service
-│   │       └── infographic.py      # Pillow-based infographic fallback
-│   ├── requirements.txt
-│   ├── test_pipeline.py            # Step-by-step pipeline debugger
-│   └── .env.example
-├── frontend/
-│   └── src/app/
-│       ├── page.tsx                        # Landing page (URL input)
-│       ├── layout.tsx                      # Root layout
-│       ├── processing/[jobId]/page.tsx     # Processing page (progress steps)
-│       └── results/[jobId]/page.tsx        # Results page (infographics + video)
-├── Proposal.pdf
-├── PLAN.md
-└── README.md
+backend/
+  app/
+    main.py                     # FastAPI, CORS, API-key middleware, lifespan
+    core/
+      config.py                 # Pydantic settings (env-driven)
+      prompts.py                # All LLM system prompts
+      logger.py
+    models/
+      chat.py, ingestion.py, pipeline.py, state.py
+    routes/
+      chat_sessions.py          # Session chat + web search branch (Gemini)
+      chat.py                   # Deprecated stateless chat
+      ingestion.py              # SSE ingestion + live-stream rejection
+      pipeline.py               # LangGraph job endpoints + video serving
+      debug.py
+    agents/
+      graph.py                  # LangGraph definition
+      ingest.py                 # Ingest node (skips if already ingested)
+      planner.py                # GPT-4o: top 3 concepts
+      script_writer.py          # GPT-4o: 2 infographic prompts per concept
+      video_generator.py        # Replicate Nano Banana Pro + ffmpeg stitch
+    services/
+      transcript.py             # yt-dlp + caption API + Whisper fallback + semantic chunking
+      vector_store.py           # ChromaDB wrapper
+      metadata.py               # yt-dlp metadata + live-stream rejection
+      summary.py                # GPT-4o structured summary
+      conversation.py           # Sliding-window history + rolling summary
+      chat_store.py             # SQLite sessions/messages/videos
+      web_search.py             # Gemini streaming with Google Search grounding
+      sse.py                    # SSE helpers
+      formatting.py, cache.py, infographic.py
+  run.sh, run-prod.sh
+  requirements.txt
+  .env.example
+frontend/
+  src/
+    app/
+      page.tsx                  # Home page - URL input with SSE ingestion progress
+      chat/[chatId]/page.tsx    # Main chat UI (video + messages + references + slideshow banner)
+      processing/[jobId]/page.tsx
+      results/[jobId]/page.tsx
+      layout.tsx, globals.css
+    lib/api.ts                  # apiFetch + withApiKey helpers
+deploy/
+  setup-gce.sh                  # One-shot VM bootstrap (python 3.12, ffmpeg, nginx, systemd)
 ```
 
-## Frontend Pages
-
-| Route | Page | Description |
-|-------|------|-------------|
-| `/` | Landing | Paste a YouTube URL and submit. Redirects to processing page. |
-| `/processing/[jobId]` | Processing | Polls `/api/status` every 3 seconds. Shows a 5-step progress indicator (ingesting, planning, designing, generating, done). Redirects to results on completion. |
-| `/results/[jobId]` | Results | Displays concept cards with titles, descriptions, and timestamp links to the source video. Shows infographic images (click to enlarge) and an embedded slideshow video. |
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/process` | Submit a YouTube URL — kicks off the full pipeline |
-| GET | `/api/status/{job_id}` | Poll job status and progress |
-| GET | `/api/result/{job_id}` | Get completed results (concepts, infographic URLs, slideshow) |
-| GET | `/api/slideshow/{job_id}` | Serve the generated slideshow MP4 |
-| GET | `/health` | Health check |
-
-## Getting Started
+## Local Development
 
 ### Prerequisites
+- Python 3.12 (`brew install python@3.12`)
+- Node.js 20+
+- ffmpeg (`brew install ffmpeg`)
+- API keys: OpenAI, Replicate, Gemini
 
-- Python 3.11+
-- Node.js 18+
-- ffmpeg (for video stitching)
-- Replicate account with API token
-
-### Backend Setup
-
-**First time only:**
+### Backend
 
 ```bash
 cd backend
-python -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and add your API keys
+cp .env.example .env   # then edit .env with your keys
+./run.sh               # runs on :8000 with --reload
 ```
 
-**Run the server:**
-
-```bash
-./backend/run.sh
-```
-
-The backend runs at `http://localhost:8000`. Verify at `http://localhost:8000/health`.
-
-### Frontend Setup
+### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev
+cp .env.example .env.local   # set NEXT_PUBLIC_API_URL
+npm run dev                  # runs on :3000
 ```
-
-The frontend runs at `http://localhost:3000`.
-
-### Running the Full App
-
-```bash
-# Terminal 1: Backend
-cd backend && ./run.sh
-
-# Terminal 2: Frontend
-cd frontend && npm run dev
-```
-
-Open `http://localhost:3000`, paste a YouTube URL, and watch the pipeline run.
-
-### Test the Pipeline Step-by-Step
-
-```bash
-cd backend
-python test_pipeline.py 1    # Step 1: Extract transcript
-python test_pipeline.py 2    # Step 2: Run planner
-python test_pipeline.py 3    # Step 3: Run script writer
-python test_pipeline.py 4    # Step 4: Generate infographics + slideshow
-```
-
-Each step saves its output to a JSON file (`test_output_N_*.json`). The next step loads from the previous step's output, so you can inspect and debug between steps.
-
-| Step | Agent | What it does |
-|------|-------|-------------|
-| 1 | Transcript Service | Fetches the YouTube transcript using the YouTube Transcript API (with fallback to Whisper). Merges raw caption entries into ~60-second chunks. Saves to `test_output_1_transcript.json`. |
-| 2 | Planner Agent (GPT-4o) | Sends the transcript to GPT-4o via Replicate. Identifies the top 3 key concepts with titles, descriptions, and timestamp ranges. Attaches relevant transcript segments to each concept. Saves to `test_output_2_planner.json`. |
-| 3 | Script Writer Agent (GPT-4o) | Takes the 3 concepts and their transcript segments. Sends to GPT-4o via Replicate to design 2 infographic prompts per concept (overview slide + deep dive slide). Saves to `test_output_3_scripts.json`. |
-| 4 | Video Generator (Nano Banana Pro) | Takes the 6 infographic prompts from step 3. Generates 6 infographic images using Google's Nano Banana Pro via Replicate. Downloads the images and stitches them into a single 30-second MP4 slideshow (5 seconds per slide) using ffmpeg. Saves to `test_output_4_videos.json`. |
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `REPLICATE_API_TOKEN` | Replicate API token (for GPT-4o + Nano Banana Pro) | Yes |
-| `OPENAI_API_KEY` | OpenAI API key (for embeddings + Whisper fallback) | Yes |
-| `MAX_COST_PER_SESSION_SGD` | Cost limit per session (default: 8.0) | No |
-| `CACHE_DIR` | Directory for cached results (default: ./cache) | No |
+**backend/.env**
 
-## Agents
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI API key (embeddings, GPT-4o for chat/planner/script writer/summary, Whisper) |
+| `REPLICATE_API_TOKEN` | Replicate token (Nano Banana Pro image generation only) |
+| `GEMINI_API_KEY` | Google AI Studio API key (web search with Google grounding) |
+| `API_KEY` | Optional. If set, all `/api/*` endpoints require `X-API-Key` header or `?api_key=` query param |
+| `CORS_ORIGINS` | Comma-separated list of allowed origins. Default `*` |
+| `CHROMA_PERSIST_DIR` | ChromaDB path, default `./chroma_db` |
+| `CHAT_DB_PATH` | SQLite path, default `./chat.db` |
+| `CACHE_DIR` | Video cache path, default `./cache` |
+| `LLM_MODEL` | Default `gpt-4o` |
+| `EMBEDDING_MODEL` | Default `text-embedding-3-small` |
 
-### Ingest Agent
-- **Input:** YouTube URL
-- **Process:** Fetch transcript (caption API with English/translation/Whisper fallback), semantic chunking via LangChain, embed and store in ChromaDB
-- **Output:** `video_id`, `transcript_chunks` with chunk indices
+**frontend/.env.local**
 
-### Planner Agent
-- **Model:** GPT-4o via Replicate
-- **Input:** RAG query on ChromaDB for overview chunks (or raw transcript as fallback)
-- **Output:** Top 3 concepts, each with title, description, timestamps, and relevant transcript segments
-- **Cost:** ~$0.02 per call
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Backend base URL, e.g. `http://localhost:8000` |
+| `NEXT_PUBLIC_API_KEY` | Must match backend `API_KEY` if set |
 
-### Script Writer Agent
-- **Model:** GPT-4o via Replicate
-- **Input:** Top 3 concepts with transcript segments
-- **Output:** 2 infographic prompts per concept (overview + deep dive)
-- **Cost:** ~$0.02 per call
+## Deployment
 
-### Video Generator Agent
-- **Model:** Google Nano Banana Pro via Replicate
-- **Input:** 6 infographic prompts from script writer
-- **Output:** 6 infographic images + 1 stitched MP4 slideshow (30s, 5s per slide)
-- **Cost:** ~$0.50 per run (6 images)
+### Backend on GCE
 
-**Total estimated cost per run:** ~$0.55
+Entire VM bootstrap is automated by [`deploy/setup-gce.sh`](deploy/setup-gce.sh):
 
-## Course Relevance (CS5260)
+```bash
+# 1. Create the VM (from your local machine)
+gcloud compute instances create ytsage-backend \
+  --zone=asia-southeast1-b \
+  --machine-type=e2-small \
+  --image-family=ubuntu-2204-lts --image-project=ubuntu-os-cloud \
+  --boot-disk-size=50GB --boot-disk-type=pd-standard \
+  --tags=http-server,https-server
 
-This project incorporates concepts from multiple weeks of the CS5260 curriculum:
+gcloud compute firewall-rules create allow-http  --allow=tcp:80  --target-tags=http-server
+gcloud compute firewall-rules create allow-https --allow=tcp:443 --target-tags=https-server
 
-| Week | Topic | How it's used in YTSage |
-|------|-------|------------------------|
-| Week 1 | Transformers, MoE | Tested with 3Blue1Brown Attention video |
-| Week 8 | Video Generation (DiT, Wan, Hunyuan) | Nano Banana Pro for infographic generation |
-| Week 10 | LLM Agents (ReAct, AutoGen) | Multi-agent LangGraph pipeline with 4 agents |
+# 2. SSH in, clone, bootstrap
+gcloud compute ssh ytsage-backend --zone=asia-southeast1-b
+git clone <repo> /opt/ytsage
+bash /opt/ytsage/deploy/setup-gce.sh
 
-## Cost Constraints
+# 3. Fill in /opt/ytsage/backend/.env
+sudo vim /opt/ytsage/backend/.env
+sudo systemctl restart ytsage
 
-- Total API cost must stay under SGD 10 for testing
-- Session aborts if estimated cost exceeds SGD 8
-- All results cached by YouTube URL hash to avoid re-processing
-- Estimated cost per run: ~$0.55
+# 4. HTTPS via Let's Encrypt (sslip.io gives a free domain for your IP)
+sudo certbot --nginx -d <ip-with-dashes>.sslip.io
+sudo sed -i "s/server_name _;/server_name <ip-with-dashes>.sslip.io;/" /etc/nginx/sites-available/ytsage
+sudo certbot install --cert-name <ip-with-dashes>.sslip.io
+```
+
+The setup script installs Python 3.12 (via deadsnakes), ffmpeg, nginx, certbot, creates the venv, installs requirements, creates a systemd unit, and configures nginx as an SSE-friendly reverse proxy to `127.0.0.1:8000`.
+
+### Frontend on Vercel
+
+1. Import the repo on Vercel
+2. **Root Directory**: `frontend`
+3. **Env vars**:
+   - `NEXT_PUBLIC_API_URL` = `https://<backend-domain>`
+   - `NEXT_PUBLIC_API_KEY` = same as backend `API_KEY`
+4. Deploy
+
+Then lock `CORS_ORIGINS` on the backend to the Vercel URL and restart the service.
+
+## Multi-Agent Pipeline Details
+
+### Ingestion (SSE)
+1. yt-dlp metadata - rejects live streams, premieres, and zero-duration content up front
+2. Transcript: English captions -> translated captions -> Whisper on downloaded audio
+3. Semantic chunking: merge captions into ~15s blocks, then split via `RecursiveCharacterTextSplitter` (1500 / 200)
+4. GPT-4o structured summary (overview, detailed narrative, topics, takeaways, timeline) runs in parallel with chunking
+5. Embed chunks and store in a per-video ChromaDB collection
+6. Register the video in the SQLite `videos` table and create a chat session
+
+### Planner (GPT-4o via OpenAI)
+- RAG query on the collection for 15 overview chunks
+- Asks GPT-4o for the top 3 concepts with titles, descriptions, timestamp ranges, and visual scene descriptions
+- Attaches the relevant transcript segments to each concept
+
+### Script writer (GPT-4o via OpenAI)
+- For each concept, designs 2 infographic prompts (overview + deep dive)
+- Both prompts are constrained to 9:16 vertical format with clean modern design language
+
+### Video generator (Replicate Nano Banana Pro)
+- 6 image generations in sequence (throttled through `asyncio.to_thread` so blocking Replicate polling never freezes the async event loop)
+- Images downloaded, then ffmpeg concat demuxer stitches them at 5s per slide into a 1080x1920 H.264 MP4
+- Path saved to the SQLite `videos` row so any future request can serve it without a running job
+
+### Chat (SSE)
+1. Load session + message history
+2. Rewrite the user's conversational question into a standalone search query (GPT-4o, temp 0)
+3. ChromaDB semantic search; filter by cosine distance < 1.0; keep top 3
+4. Emit `sources` event so the frontend renders references before tokens arrive
+5. Assemble: system prompt + video metadata + summary + rolling history summary + recent messages + question + transcript excerpts
+6. Stream tokens via `ChatOpenAI.astream`, persist the final response
+
+### Web search (SSE)
+Alternative branch triggered by the "Web search" toggle. Uses `google-genai` with `Tool(google_search=GoogleSearch())` on `gemini-2.5-flash`. Streams Gemini's answer and collects grounding citations into a `web_sources` event.
+
+## Security
+
+- API key auth via `X-API-Key` header (or `?api_key=` query param for `<video src>`)
+- CORS locked to the Vercel deployment
+- HTTPS via Let's Encrypt on a free sslip.io subdomain
+- Live streams / stations / premieres rejected before ingestion begins
+- `replicate.run()` wrapped in `asyncio.to_thread` so blocking polls don't freeze the FastAPI event loop
+
+## Cost per Full Run
+
+| Component | Approx cost |
+|---|---|
+| GPT-4o summary | $0.01 |
+| GPT-4o planner | $0.02 |
+| GPT-4o script writer | $0.02 |
+| GPT-4o chat (per message) | $0.01 |
+| OpenAI embeddings | negligible |
+| Gemini Flash (web search) | free tier |
+| Nano Banana Pro (6 images) | ~$0.50 |
+| **Total per infographic run** | **~$0.55** |
 
 ## Team
 

@@ -107,6 +107,10 @@ def _whisper_transcribe(youtube_url: str) -> list[dict]:
             "quiet": True,
             "no_warnings": True,
         }
+        # Use cookies file if present (helps bypass YouTube bot detection on cloud IPs)
+        _cookies = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
+        if os.path.isfile(_cookies):
+            ydl_opts["cookiefile"] = _cookies
 
         log.info("Downloading audio via yt-dlp...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
