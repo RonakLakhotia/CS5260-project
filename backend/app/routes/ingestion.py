@@ -40,6 +40,19 @@ async def _already_ingested(video_id: str, youtube_url: str):
     """Video exists in ChromaDB — emit metadata + done immediately."""
     stored = get_video_metadata(video_id)
     meta = _parse_db_metadata(stored) if stored else None
+
+    # Ensure video record exists in SQLite (migration for old data)
+    existing = await chat_store.get_video(video_id)
+    if not existing and stored:
+        await chat_store.upsert_video(
+            video_id=video_id,
+            youtube_url=youtube_url,
+            title=stored.get("title", ""),
+            channel=stored.get("channel", ""),
+            duration=stored.get("duration", 0),
+            thumbnail=stored.get("thumbnail", ""),
+        )
+
     chat_id = await chat_store.create_session(video_id, youtube_url)
 
     if meta:
@@ -109,7 +122,16 @@ async def _stream_ingestion(video_id: str, youtube_url: str):
         log.info("[ingest:%s] Embedding and storing...", video_id)
         await asyncio.to_thread(ingest_chunks, video_id, youtube_url, chunks, video_meta)
 
-        # Step 5: Create chat session
+        # Step 5: Save video record + create chat session
+        await chat_store.upsert_video(
+            video_id=video_id,
+            youtube_url=youtube_url,
+            title=video_meta.get("title", ""),
+            channel=video_meta.get("channel", ""),
+            duration=video_meta.get("duration", 0),
+            thumbnail=video_meta.get("thumbnail", ""),
+            chunk_count=len(chunks),
+        )
         chat_id = await chat_store.create_session(video_id, youtube_url)
         log.info("[ingest:%s] Chat session created: %s", video_id, chat_id[:8])
 
@@ -148,7 +170,22 @@ async def ingest_video(
     Streams progress events as the pipeline runs: metadata → transcript → summary → embedding → done.
     Pass ?reingest=true to force re-ingestion.
     """
-    video_id = extract_video_id(request.youtube_url)
+    try:
+        video_id = extract_video_id(request.youtube_url)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL. Please enter a valid public YouTube video link.")
+
+    # Pre-validate: reject live streams / stations before starting the SSE stream
+    if not reingest and not is_video_ingested(video_id):
+        try:
+            from app.services.metadata import fetch_video_metadata
+            meta = fetch_video_metadata(request.youtube_url)
+            # fetch_video_metadata raises ValueError for live/station content
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception:
+            pass  # let the SSE stream handle other errors
+
     log.info("Ingestion requested for video %s (reingest=%s)", video_id, reingest)
 
     # Already ingested — emit metadata + done immediately

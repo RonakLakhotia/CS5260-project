@@ -5,7 +5,6 @@ and ffmpeg for stitching slides into a video.
 """
 import os
 import asyncio
-import hashlib
 import subprocess
 import tempfile
 import urllib.request
@@ -15,6 +14,7 @@ import replicate
 from app.models import YTSageState
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.services import chat_store
 
 log = get_logger("agent.video_generator")
 
@@ -47,10 +47,14 @@ def _get_infographic_prompts(script: dict) -> list[str]:
 
 
 async def _run_with_retry(model: str, input_params: dict, label: str) -> object | None:
-    """Run a Replicate model with retry logic for rate limits."""
+    """Run a Replicate model with retry logic for rate limits.
+
+    Uses asyncio.to_thread so the blocking replicate.run() call
+    does not freeze the event loop (which would block chat and other endpoints).
+    """
     for attempt in range(MAX_RETRIES):
         try:
-            output = replicate.run(model, input=input_params)
+            output = await asyncio.to_thread(replicate.run, model, input=input_params)
             return output
         except Exception as e:
             if "429" in str(e) and attempt < MAX_RETRIES - 1:
@@ -164,7 +168,6 @@ async def generate_videos(state: YTSageState) -> dict:
             url = await _generate_infographic(prompt, f"Infographic {i + 1}: {concept_title}")
             if url:
                 concept_urls.append(url)
-            await asyncio.sleep(RETRY_DELAY)
 
         video_results.append({
             "concept_title": concept_title,
@@ -185,11 +188,13 @@ async def generate_videos(state: YTSageState) -> dict:
                     image_paths.append(img_path)
 
             if image_paths:
-                url_hash = hashlib.sha256(state.get("youtube_url", "").encode()).hexdigest()[:12]
-                slideshow_path = os.path.join(output_dir, f"slideshow_{url_hash}.mp4")
+                video_id = state.get("video_id", "unknown")
+                slideshow_path = os.path.join(output_dir, f"slideshow_{video_id}.mp4")
 
                 if _stitch_slideshow(image_paths, slideshow_path):
                     print(f"  Slideshow saved to {slideshow_path}")
+                    # Persist path in SQLite
+                    await chat_store.set_slideshow_path(video_id, slideshow_path)
                 else:
                     print(f"  Slideshow stitching failed")
                     slideshow_path = None

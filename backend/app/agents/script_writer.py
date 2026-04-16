@@ -1,14 +1,12 @@
-import os
 import json
-import replicate
+
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.models import YTSageState
 
 log = get_logger("agent.script_writer")
-
-LLM_MODEL = "openai/gpt-4o"
 
 
 async def write_scripts(state: YTSageState) -> dict:
@@ -24,7 +22,6 @@ async def write_scripts(state: YTSageState) -> dict:
         }
 
     log.info("Script writer started for %d concepts", len(top_concepts[:3]))
-    os.environ["REPLICATE_API_TOKEN"] = settings.replicate_api_token
 
     # Build per-concept context from planner segments instead of full transcript
     concepts_text_parts = []
@@ -50,7 +47,7 @@ async def write_scripts(state: YTSageState) -> dict:
 
     concepts_text = "\n\n".join(concepts_text_parts)
 
-    prompt = f"""You are an educational content designer. Given a YouTube video transcript and a list of key concepts, design 2 infographic slides per concept.
+    user_prompt = f"""Given a YouTube video transcript and a list of key concepts, design 2 infographic slides per concept.
 
 For each concept, provide:
 1. "concept_title": The concept title
@@ -65,18 +62,19 @@ Concepts to write about (with relevant transcript segments):
 {concepts_text}"""
 
     try:
-        log.info("Calling GPT-4o via Replicate for infographic prompts...")
-        output = replicate.run(
-            LLM_MODEL,
-            input={
-                "prompt": prompt,
-                "system_prompt": "You are an educational content writer. Return only valid JSON.",
-                "max_completion_tokens": 2000,
-                "temperature": 0.4,
-            },
+        log.info("Calling %s via OpenAI for infographic prompts...", settings.llm_model)
+        llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            temperature=0.4,
+            max_tokens=2000,
         )
+        response = await llm.ainvoke([
+            {"role": "system", "content": "You are an educational content writer. Return only valid JSON."},
+            {"role": "user", "content": user_prompt},
+        ])
 
-        response_text = "".join(output)
+        response_text = response.content
 
         start_idx = response_text.find("[")
         end_idx = response_text.rfind("]") + 1

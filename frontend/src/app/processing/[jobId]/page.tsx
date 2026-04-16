@@ -16,11 +16,11 @@ const STEPS = [
 
 function getStepIndex(progress: string): number {
   const lower = progress.toLowerCase();
-  if (lower.includes("ingest") || lower.includes("transcript")) return 0;
-  if (lower.includes("plan") || lower.includes("concept")) return 1;
-  if (lower.includes("script") || lower.includes("infographic prompt") || lower.includes("design")) return 2;
+  if (lower.includes("done") || lower.includes("finaliz")) return 4;
   if (lower.includes("generat") || lower.includes("video") || lower.includes("stitch")) return 3;
-  if (lower.includes("done")) return 4;
+  if (lower.includes("script") || lower.includes("infographic prompt") || lower.includes("design")) return 2;
+  if (lower.includes("plan") || lower.includes("concept") || lower.includes("identify")) return 1;
+  if (lower.includes("ingest") || lower.includes("transcript")) return 0;
   return 0;
 }
 

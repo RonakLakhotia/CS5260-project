@@ -1,6 +1,6 @@
-import os
 import json
-import replicate
+
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -8,8 +8,6 @@ from app.models import YTSageState
 from app.services.vector_store import query_chunks
 
 log = get_logger("agent.planner")
-
-LLM_MODEL = "openai/gpt-4o"
 
 
 async def plan_concepts(state: YTSageState) -> dict:
@@ -49,9 +47,7 @@ async def plan_concepts(state: YTSageState) -> dict:
     if len(context) > 30000:
         context = context[:30000]
 
-    os.environ["REPLICATE_API_TOKEN"] = settings.replicate_api_token
-
-    prompt = f"""You are an educational content analyst. Given a YouTube video transcript, identify the top 3 most important concepts or topics discussed.
+    user_prompt = f"""Given the following YouTube video transcript, identify the top 3 most important concepts or topics discussed.
 
 For each concept, provide:
 1. A clear, concise title (5-8 words)
@@ -72,18 +68,19 @@ Transcript:
 {context}"""
 
     try:
-        log.info("Calling GPT-4o via Replicate to rank concepts...")
-        output = replicate.run(
-            LLM_MODEL,
-            input={
-                "prompt": prompt,
-                "system_prompt": "You are an educational content analyst. Return only valid JSON.",
-                "max_completion_tokens": 1500,
-                "temperature": 0.3,
-            },
+        log.info("Calling %s via OpenAI to rank concepts...", settings.llm_model)
+        llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            temperature=0.3,
+            max_tokens=1500,
         )
+        response = await llm.ainvoke([
+            {"role": "system", "content": "You are an educational content analyst. Return only valid JSON."},
+            {"role": "user", "content": user_prompt},
+        ])
 
-        response_text = "".join(output)
+        response_text = response.content
 
         start_idx = response_text.find("[")
         end_idx = response_text.rfind("]") + 1

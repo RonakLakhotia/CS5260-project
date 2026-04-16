@@ -84,7 +84,7 @@ CHAT_SYSTEM_PROMPT = (
     "You also have the conversation history with this user.\n\n"
     "Guidelines:\n"
     "- Use the video summary and transcript excerpts to answer accurately.\n"
-    "- Cite timestamps using [MM:SS] format when referencing specific moments.\n"
+    "- Do NOT include timestamps in your answer. The system automatically shows transcript references separately.\n"
     "- Maintain coherence with your previous answers in this conversation.\n"
     "- If the available information doesn't cover the question, say so.\n"
     "- Be conversational and helpful."
@@ -93,7 +93,7 @@ CHAT_SYSTEM_PROMPT = (
 STATELESS_CHAT_SYSTEM_PROMPT = (
     "You answer questions about a YouTube video. You have access to the video's "
     "metadata and relevant transcript excerpts. Use both to answer accurately.\n"
-    "Cite timestamps in your answer using [MM:SS] format when referencing transcript content.\n"
+    "Do NOT include timestamps in your answer. The system shows transcript references separately.\n"
     "If the available information doesn't cover the question, say so."
 )
 

@@ -32,6 +32,7 @@ class CreateSessionResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     question: str
+    web_search: bool = False
 
 
 class SendMessageResponse(BaseModel):

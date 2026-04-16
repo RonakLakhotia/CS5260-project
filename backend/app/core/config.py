@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     max_transcript_tokens: int = 100000
     chat_db_path: str = "./chat.db"
     chat_history_token_budget: int = 50000
+    cors_origins: str = "*"  # comma-separated origins, or "*" for all
+    gemini_api_key: str = ""
 
     model_config = {"env_file": ".env"}
 

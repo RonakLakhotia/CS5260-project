@@ -39,3 +39,7 @@ chroma_db/
 *.webm
 
 CLAUDE.md
+
+chat*
+
+*.md
