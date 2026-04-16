@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Markdown from "react-markdown";
+import { apiFetch } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -120,7 +121,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!chatId) return;
-    fetch(`${API}/api/chat/sessions/${chatId}/messages`).then(r=>r.json()).then(d => {
+    apiFetch(`${API}/api/chat/sessions/${chatId}/messages`).then(r=>r.json()).then(d => {
       if (Array.isArray(d) && d.length) setMsgs(d.map((m:{role:string;content:string}) => ({ role: m.role as "user"|"assistant", content: m.content })));
     }).catch(()=>{});
   }, [chatId]);
@@ -134,7 +135,7 @@ export default function ChatPage() {
     if (savedSteps) { try { setSsSteps(JSON.parse(savedSteps)); } catch {} }
 
     // Ask backend for authoritative video status
-    fetch(`${API}/api/videos/${videoId}`).then(r => r.ok ? r.json() : null).then(d => {
+    apiFetch(`${API}/api/videos/${videoId}`).then(r => r.ok ? r.json() : null).then(d => {
       if (!d) return;
 
       if (d.has_slideshow) {
@@ -162,7 +163,7 @@ export default function ChatPage() {
     if (!ssJob || ssState !== "processing") return;
     const iv = setInterval(async () => {
       try {
-        const r = await fetch(`${API}/api/status/${ssJob}`);
+        const r = await apiFetch(`${API}/api/status/${ssJob}`);
         if (!r.ok) return;
         const d = await r.json();
         const prog = d.progress as string;
@@ -187,7 +188,7 @@ export default function ChatPage() {
     if (taRef.current) taRef.current.style.height = "20px";
     setMsgs(p => [...p, { role: "user", content: q }, { role: "assistant", content: "" }]);
     try {
-      const res = await fetch(`${API}/api/chat/sessions/${chatId}/messages`, {
+      const res = await apiFetch(`${API}/api/chat/sessions/${chatId}/messages`, {
         method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ question: q, web_search: webSearch }),
       });
       if (!res.ok) throw 0;

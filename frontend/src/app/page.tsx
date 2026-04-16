@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -47,7 +48,7 @@ export default function Home() {
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch(`${API_URL}/api/ingest`, {
+      const res = await apiFetch(`${API_URL}/api/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ youtube_url: url }),
@@ -110,7 +111,7 @@ export default function Home() {
         setStep("done");
         const chatId = data.chat_id as string;
         const videoId = data.video_id as string;
-        fetch(`${API_URL}/api/process`, {
+        apiFetch(`${API_URL}/api/process`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ youtube_url: url }),

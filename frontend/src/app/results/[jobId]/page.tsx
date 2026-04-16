@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -44,7 +45,7 @@ export default function ResultsPage() {
 
     async function fetchResult() {
       try {
-        const res = await fetch(`${API_URL}/api/result/${jobId}`);
+        const res = await apiFetch(`${API_URL}/api/result/${jobId}`);
         if (!res.ok) {
           setError("Could not load results. The job may still be processing.");
           return;

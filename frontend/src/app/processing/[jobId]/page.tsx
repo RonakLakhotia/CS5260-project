@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { use } from "react";
+import { apiFetch } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -36,7 +37,7 @@ export default function ProcessingPage() {
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_URL}/api/status/${jobId}`);
+        const res = await apiFetch(`${API_URL}/api/status/${jobId}`);
         if (!res.ok) {
           setError("Job not found");
           clearInterval(interval);

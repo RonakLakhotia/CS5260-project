@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     chat_history_token_budget: int = 50000
     cors_origins: str = "*"  # comma-separated origins, or "*" for all
     gemini_api_key: str = ""
+    api_key: str = ""  # if set, all /api/* requests require X-API-Key header
 
     model_config = {"env_file": ".env"}
 

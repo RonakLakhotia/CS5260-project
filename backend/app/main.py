@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.routes import router
@@ -30,6 +31,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_key_check(request: Request, call_next):
+    """If API_KEY is set, require X-API-Key header on /api/* routes."""
+    if settings.api_key and request.url.path.startswith("/api/"):
+        # Preflight OPTIONS requests skip auth (browsers don't send custom headers on them)
+        if request.method != "OPTIONS":
+            client_key = request.headers.get("x-api-key", "")
+            if client_key != settings.api_key:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or missing API key"},
+                )
+    return await call_next(request)
+
 
 app.include_router(router, prefix="/api")
 
