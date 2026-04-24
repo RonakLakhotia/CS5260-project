@@ -24,6 +24,7 @@ from app.services.formatting import (
     ensure_video_ingested,
 )
 from app.services.conversation import build_history_window
+from app.services.router import route_question
 from app.services.web_search import stream_web_answer
 from app.services.sse import format_sse, sse_status, sse_error
 from app.services import chat_store
@@ -68,7 +69,11 @@ SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 # ── SSE Chat Stream ──────────────────────────────────────────────────────────
 
 async def _stream_chat(chat_id: str, session: dict, question: str, web_search: bool = False):
-    """Async generator that streams the chat response as SSE events."""
+    """Async generator that streams the chat response as SSE events.
+
+    web_search=True forces the Gemini web-search path. Otherwise an LLM router
+    decides per-question whether to answer from the transcript or the live web.
+    """
     try:
         video_id = session["video_id"]
 
@@ -80,7 +85,23 @@ async def _stream_chat(chat_id: str, session: dict, question: str, web_search: b
         all_messages = await chat_store.get_messages(chat_id)
         running_summary, recent_messages = await build_history_window(session, all_messages)
 
+        # 3. Fetch video metadata once (used by both branches and by the router)
+        video_meta = get_video_metadata(video_id) or {}
+
+        # 4. Decide route: explicit override takes priority, else auto-route
         if web_search:
+            use_web = True
+            log.info("[chat:%s] Route=web (forced by toggle)", chat_id[:8])
+        else:
+            route = await route_question(
+                question,
+                video_title=video_meta.get("title"),
+                video_description=video_meta.get("description"),
+                recent_messages=recent_messages,
+            )
+            use_web = route == "web"
+
+        if use_web:
             # ── Gemini web search path ── (handles search + answer in one call)
             yield sse_status("searching_web")
             yield sse_status("generating")
@@ -106,8 +127,7 @@ async def _stream_chat(chat_id: str, session: dict, question: str, web_search: b
             return
 
         else:
-            # ── Video transcript path (original) ──
-            video_meta = get_video_metadata(video_id) or {}
+            # ── Video transcript path ──
             meta_context = format_metadata_context(video_meta)
             summary_context = extract_detailed_summary(video_meta)
 
